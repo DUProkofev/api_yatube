@@ -1,15 +1,8 @@
-from rest_framework import status, viewsets
-from rest_framework.response import Response
+from rest_framework import viewsets
+from rest_framework.exceptions import PermissionDenied, NotFound
 
-from posts.models import Comment, Group, Post, User
-
-from .serializers import (CommentSerializer, GroupSerializer, PostSerializer,
-                          UserSerializer)
-
-
-class UserViewSet(viewsets.ReadOnlyModelViewSet):
-    serializer_class = UserSerializer
-    queryset = User.objects.all()
+from posts.models import Comment, Group, Post
+from .serializers import (CommentSerializer, GroupSerializer, PostSerializer)
 
 
 class PostViewSet(viewsets.ModelViewSet):
@@ -19,36 +12,15 @@ class PostViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
 
-    def update(self, request, *args, **kwargs):
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
-        serializer = self.get_serializer(
-            instance,
-            data=request.data,
-            partial=partial
-        )
-        serializer.is_valid(raise_exception=True)
+    def perform_update(self, serializer):
         if serializer.instance.author != self.request.user:
-            return Response(
-                {'Изменение чужого контента запрещено!'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        self.perform_update(serializer)
+            raise PermissionDenied('Изменение чужого контента запрещено!')
+        super().perform_update(serializer)
 
-        if getattr(instance, '_prefetched_objects_cache', None):
-            instance._prefetched_objects_cache = {}
-
-        return Response(serializer.data)
-
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if instance.author != request.user:
-            return Response(
-                {'Удаление чужого контента запрещено!'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+    def perform_destroy(self, instance):
+        if instance.author != self.request.user:
+            raise PermissionDenied('Удаление чужого контента запрещено!')
+        super().perform_destroy(instance)
 
 
 class GroupViewSet(viewsets.ReadOnlyModelViewSet):
@@ -60,40 +32,26 @@ class CommentViewSet(viewsets.ModelViewSet):
     serializer_class = CommentSerializer
 
     def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
-
-    def update(self, request, *args, **kwargs):
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
-        serializer = self.get_serializer(
-            instance,
-            data=request.data,
-            partial=partial
+        post = Post.objects.filter(id=self.kwargs.get('post_id'))
+        if not post.exists():
+            raise NotFound
+        serializer.save(
+            author=self.request.user,
+            post=post.first(),
         )
-        serializer.is_valid(raise_exception=True)
+
+    def perform_update(self, serializer):
         if serializer.instance.author != self.request.user:
-            return Response(
-                {'Изменение чужого контента запрещено!'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        self.perform_update(serializer)
+            raise PermissionDenied('Изменение чужого контента запрещено!')
+        super().perform_update(serializer)
 
-        if getattr(instance, '_prefetched_objects_cache', None):
-            instance._prefetched_objects_cache = {}
-
-        return Response(serializer.data)
-
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if instance.author != request.user:
-            return Response(
-                {'Удаление чужого контента запрещено!'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        self.perform_destroy(instance)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+    def perform_destroy(self, instance):
+        if instance.author != self.request.user:
+            raise PermissionDenied('Удаление чужого контента запрещено!')
+        super().perform_destroy(instance)
 
     def get_queryset(self):
-        post_id = self.kwargs.get("post_id")
-        new_queryset = Comment.objects.filter(post_id=post_id)
-        return new_queryset
+        post_id = self.kwargs.get('post_id')
+        if not Post.objects.filter(id=post_id).exists():
+            raise NotFound(f'Пост с id {post_id} не существует')
+        return Comment.objects.filter(post_id=post_id)
