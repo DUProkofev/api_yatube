@@ -1,5 +1,6 @@
 from rest_framework import viewsets
-from rest_framework.exceptions import PermissionDenied, NotFound
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.generics import get_object_or_404
 
 from posts.models import Comment, Group, Post
 from .serializers import (CommentSerializer, GroupSerializer, PostSerializer)
@@ -32,12 +33,10 @@ class CommentViewSet(viewsets.ModelViewSet):
     serializer_class = CommentSerializer
 
     def perform_create(self, serializer):
-        post = Post.objects.filter(id=self.kwargs.get('post_id'))
-        if not post.exists():
-            raise NotFound
+        post = get_object_or_404(Post, id=self.kwargs.get('post_id'))
         serializer.save(
             author=self.request.user,
-            post=post.first(),
+            post=post,
         )
 
     def perform_update(self, serializer):
@@ -51,7 +50,5 @@ class CommentViewSet(viewsets.ModelViewSet):
         super().perform_destroy(instance)
 
     def get_queryset(self):
-        post_id = self.kwargs.get('post_id')
-        if not Post.objects.filter(id=post_id).exists():
-            raise NotFound(f'Пост с id {post_id} не существует')
-        return Comment.objects.filter(post_id=post_id)
+        post = get_object_or_404(Post, id=self.kwargs.get('post_id'))
+        return Comment.objects.filter(post_id=post.id)
